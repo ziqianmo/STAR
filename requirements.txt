@@ -16,3 +16,4 @@ tqdm>=4.64,<5
 Pillow>=9,<13
 PyYAML>=6,<7
 requests>=2.28,<3
+gdown==6.5.1

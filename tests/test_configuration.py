@@ -98,19 +98,30 @@ class ConfigurationTests(unittest.TestCase):
         actual = configure_training(config, ["--dataset", "U1652-S2D"])
         self.assertEqual(actual.direction, "S2D")
 
+    def test_invalid_warmup_ratios_are_rejected(self):
+        config = TrainingConfig(data_folder=str(self.root), device="cpu")
+        import contextlib
+        import io
+
+        for ratio in ("-0.1", "1", "nan"):
+            with self.subTest(ratio=ratio), contextlib.redirect_stderr(
+                io.StringIO()
+            ), self.assertRaises(SystemExit):
+                configure_training(config, ["--warmup-ratio", ratio])
+
     def test_project_defaults_are_absolute(self):
         for config in (TrainingConfig(), EvaluationConfig()):
             self.assertTrue(Path(config.data_folder).is_absolute())
         self.assertTrue(Path(TrainingConfig().model_path).is_absolute())
 
-    def test_experiment_defaults_are_retained(self):
+    def test_experiment_defaults_match_the_paper(self):
         university = importlib.import_module("train_university").Configuration()
         sues = importlib.import_module("train_sues200").Configuration()
         self.assertEqual(
             (university.lr, university.pretrained, university.nclasses),
-            (0.001, False, 701),
+            (0.001, True, 701),
         )
-        self.assertEqual((sues.lr, sues.pretrained, sues.nclasses), (0.0006, True, 200))
+        self.assertEqual((sues.lr, sues.pretrained, sues.nclasses), (0.001, True, 200))
 
 
 if __name__ == "__main__":

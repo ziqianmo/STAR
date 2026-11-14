@@ -9,7 +9,7 @@ from star.training import TrainingConfig, run_training
 class Configuration(TrainingConfig):
     dataset_name: str = "sues200"
     pretrained: bool = True
-    lr: float = 0.0006
+    lr: float = 0.001
     nclasses: int = 200
     altitude: int = 300
 

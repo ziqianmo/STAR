@@ -3,16 +3,8 @@
     "dataset": "University-1652",
     "altitude_m": null,
     "file": "university1652/weights_e1_0.9535.pth",
-    "url": null,
+    "url": "https://drive.google.com/file/d/1_DNSV1A3AkkqyTi9S1CDJMV8a_zT3toT/view?usp=drive_link",
     "size_bytes": 386571866,
     "sha256": "6be2e5e9de379d689720588d0b3486e2fc34eb915ba184f9c396a575c42fe2de"
-  },
-  "sues200_150m": {
-    "dataset": "SUES-200",
-    "altitude_m": 150,
-    "file": "sues200_150m/weights_e1_0.9728.pth",
-    "url": null,
-    "size_bytes": 383487706,
-    "sha256": "7fbdd3ad23ad1ea00b34a21139d0d14213489ca661c839709361774814e3c637"
   }
 }

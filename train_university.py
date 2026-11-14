@@ -8,7 +8,7 @@ from star.training import TrainingConfig, run_training
 @dataclass
 class Configuration(TrainingConfig):
     dataset_name: str = "university"
-    pretrained: bool = False
+    pretrained: bool = True
     lr: float = 0.001
     nclasses: int = 701
 

@@ -7,6 +7,8 @@ import importlib.util
 import io
 from pathlib import Path
 import tempfile
+import sys
+from types import SimpleNamespace
 import threading
 import unittest
 from unittest.mock import patch
@@ -56,9 +58,8 @@ class WeightDownloadTests(unittest.TestCase):
 
     def test_release_entries_and_paths(self):
         entries = weights.load_manifest()
-        self.assertEqual(set(entries), {"university1652", "sues200_150m"})
+        self.assertEqual(set(entries), {"university1652"})
         self.assertIsNone(entries["university1652"]["altitude_m"])
-        self.assertEqual(entries["sues200_150m"]["altitude_m"], 150)
         for entry in entries.values():
             self.assertRegex(entry["sha256"], r"^[0-9a-f]{64}$")
             self.assertTrue(
@@ -106,6 +107,69 @@ class WeightDownloadTests(unittest.TestCase):
             self.assertIn("has not been added yet", stderr.getvalue())
             download.assert_not_called()
             self.assertFalse(output.exists())
+
+    def test_google_drive_links_extract_the_exact_file_id(self):
+        cases = {
+            "https://drive.google.com/file/d/1_DNSV1A3AkkqyTi9S1CDJMV8a_zT3toT/view?usp=drive_link": "1_DNSV1A3AkkqyTi9S1CDJMV8a_zT3toT",
+            "https://drive.google.com/file/d/another_example_file_id/view?usp=drive_link": "another_example_file_id",
+            "https://drive.google.com/uc?export=download&id=example_id": "example_id",
+            "https://drive.usercontent.google.com/download?id=example_id": "example_id",
+        }
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                self.assertEqual(weights.google_drive_file_id(url), expected)
+        self.assertIsNone(weights.google_drive_file_id("https://example.com/file.pth"))
+        with self.assertRaisesRegex(ValueError, "not a folder"):
+            weights.google_drive_file_id(
+                "https://drive.google.com/drive/folders/example"
+            )
+
+    def test_google_drive_download_publishes_only_verified_weights(self):
+        def fake_download(**kwargs):
+            self.assertEqual(kwargs["id"], "example_id")
+            self.assertFalse(kwargs["use_cookies"])
+            self.assertEqual(kwargs["user_agent"], "Mozilla/5.0")
+            Path(kwargs["output"]).write_bytes(self.payload)
+            return kwargs["output"]
+
+        gdown = SimpleNamespace(download=fake_download)
+        with patch.dict(sys.modules, {"gdown": gdown}), contextlib.redirect_stdout(
+            io.StringIO()
+        ):
+            path = weights.download(
+                self.entry, self.root, "https://drive.google.com/file/d/example_id/view"
+            )
+        self.assertEqual(path.read_bytes(), self.payload)
+        self.assertFalse(list(self.root.rglob("*.part")))
+
+    def test_corrupted_google_drive_download_is_not_published(self):
+        def fake_download(**kwargs):
+            Path(kwargs["output"]).write_bytes(b"X" * len(self.payload))
+            return kwargs["output"]
+
+        gdown = SimpleNamespace(download=fake_download)
+        with patch.dict(sys.modules, {"gdown": gdown}), contextlib.redirect_stdout(
+            io.StringIO()
+        ), self.assertRaisesRegex(ValueError, "SHA-256"):
+            weights.download(
+                self.entry, self.root, "https://drive.google.com/file/d/example_id/view"
+            )
+        self.assertFalse((self.root / self.entry["file"]).exists())
+        self.assertFalse(list(self.root.rglob("*.part")))
+
+    def test_google_drive_access_failure_does_not_leave_a_checkpoint(self):
+        def fake_download(**kwargs):
+            raise RuntimeError("Permission denied")
+
+        gdown = SimpleNamespace(download=fake_download)
+        with patch.dict(sys.modules, {"gdown": gdown}), contextlib.redirect_stdout(
+            io.StringIO()
+        ), self.assertRaisesRegex(RuntimeError, "public link access"):
+            weights.download(
+                self.entry, self.root, "https://drive.google.com/file/d/example_id/view"
+            )
+        self.assertFalse((self.root / self.entry["file"]).exists())
+        self.assertFalse(list(self.root.rglob("*.part")))
 
     def test_manifest_cannot_escape_checkpoint_directory(self):
         for name in ("../outside.pth", "/outside.pth"):

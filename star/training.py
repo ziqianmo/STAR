@@ -39,7 +39,7 @@ class TrainingConfig:
     # Backbone and STAR branches. Keep these fixed for comparable experiments.
     dataset_name: str = "university"
     model: str = "convnext_base.fb_in22k_ft_in1k_384"
-    pretrained: bool = False
+    pretrained: bool = True
     img_size: int = 384
     handcraft_model: bool = True
     timm_use: bool = True
@@ -61,9 +61,11 @@ class TrainingConfig:
     clip_grad: float | None = 100.0
     decay_exclue_bias: bool = False
     label_smoothing: float = 0.1
+    vsam_loss_weight: float = 0.5
+    classification_loss_weight: float = 0.03
     lr: float = 0.001
     scheduler: str = "cosine"
-    warmup_epochs: float = 0.1
+    warmup_ratio: float = 0.1
     lr_end: float = 0.0001
     prob_flip: float = 0.5
     cudnn_benchmark: bool = True
@@ -148,6 +150,7 @@ def configure(default, argv=None):
             "--" + name.replace("_", "-"), type=int, default=getattr(config, name)
         )
     parser.add_argument("--lr", type=float, default=config.lr)
+    parser.add_argument("--warmup-ratio", type=float, default=config.warmup_ratio)
     parser.add_argument("--device", default=config.device)
     parser.add_argument(
         "--pretrained", action=argparse.BooleanOptionalAction, default=config.pretrained
@@ -191,6 +194,8 @@ def configure(default, argv=None):
         or config.lr <= 0
     ):
         parser.error("Worker and limit counts cannot be negative; lr must be positive")
+    if not 0 <= config.warmup_ratio < 1:
+        parser.error("warmup-ratio must be between 0 (inclusive) and 1 (exclusive)")
     try:
         device = torch.device(config.device)
         if device.type not in ("cpu", "cuda"):
@@ -256,6 +261,32 @@ def run_training(default, argv=None, entry_file=None):
     finally:
         logger.close()
     return run
+
+
+def build_scheduler(config, optimizer, train_steps):
+    """Build the LR schedule using a fraction of the total optimizer steps."""
+    warmup_steps = int(train_steps * config.warmup_ratio)
+    if config.scheduler == "polynomial":
+        scheduler = get_polynomial_decay_schedule_with_warmup(
+            optimizer,
+            num_training_steps=train_steps,
+            lr_end=config.lr_end,
+            power=1.5,
+            num_warmup_steps=warmup_steps,
+        )
+    elif config.scheduler == "cosine":
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_training_steps=train_steps,
+            num_warmup_steps=warmup_steps,
+        )
+    elif config.scheduler == "constant":
+        scheduler = get_constant_schedule_with_warmup(
+            optimizer, num_warmup_steps=warmup_steps
+        )
+    else:
+        scheduler = None
+    return scheduler, warmup_steps
 
 
 def _train_experiment(config, model_path):
@@ -439,54 +470,17 @@ def _train_experiment(config, model_path):
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
 
-    # Scheduler.
-
+    # The paper warms up the first 10% of the complete training run.
     steps_per_epoch = (
         min(len(train_dataloader), config.max_train_batches)
         if config.max_train_batches
         else len(train_dataloader)
     )
     train_steps = steps_per_epoch * config.epochs
-    # Preserve each experiment's original warmup convention.
-    warmup_steps = steps_per_epoch * config.warmup_epochs
-    if config.dataset_name == "university":
-        warmup_steps = int(warmup_steps)
-
-    if config.scheduler == "polynomial":
-        print(
-            "\nScheduler: polynomial - max LR: {} - end LR: {}".format(
-                config.lr, config.lr_end
-            )
-        )
-        scheduler = get_polynomial_decay_schedule_with_warmup(
-            optimizer,
-            num_training_steps=train_steps,
-            lr_end=config.lr_end,
-            power=1.5,
-            num_warmup_steps=warmup_steps,
-        )
-
-    elif config.scheduler == "cosine":
-        print("\nScheduler: cosine - max LR: {}".format(config.lr))
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer, num_training_steps=train_steps, num_warmup_steps=warmup_steps
-        )
-
-    elif config.scheduler == "constant":
-        print("\nScheduler: constant - max LR: {}".format(config.lr))
-        scheduler = get_constant_schedule_with_warmup(
-            optimizer, num_warmup_steps=warmup_steps
-        )
-
-    else:
-        scheduler = None
-
-    print(
-        "Warmup Epochs: {} - Warmup Steps: {}".format(
-            str(config.warmup_epochs).ljust(2), warmup_steps
-        )
-    )
-    print("Train Epochs:  {} - Train Steps:  {}".format(config.epochs, train_steps))
+    scheduler, warmup_steps = build_scheduler(config, optimizer, train_steps)
+    print(f"Scheduler: {config.scheduler} - max LR: {config.lr}")
+    print(f"Warmup ratio: {config.warmup_ratio:.0%} - Warmup Steps: {warmup_steps}")
+    print(f"Train Epochs: {config.epochs} - Train Steps: {train_steps}")
 
     # Zero shot.
     if config.zero_shot:

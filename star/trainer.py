@@ -150,7 +150,11 @@ def train(
                         features_vsam_1, features_vsam_2, model.logit_scale_blocks.exp()
                     )
 
-                lossall = loss + 0.5 * loss_VSAM + 0.05 * loss_cls
+                lossall = (
+                    loss
+                    + train_config.vsam_loss_weight * loss_VSAM
+                    + train_config.classification_loss_weight * loss_cls
+                )
                 if not torch.isfinite(lossall):
                     raise FloatingPointError(
                         "Non-finite training loss at batch {}".format(step)

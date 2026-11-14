@@ -78,27 +78,25 @@ This retains the raw images and creates directory links using the fixed 120-trai
 
 ### Released model weights
 
-Two checkpoint entries are reserved for this release. **Download links will be added here and in [`checkpoints/weights.json`](checkpoints/weights.json).**
+The University-1652 checkpoint is available on Google Drive. Its download link, local path, file size, and SHA-256 checksum are recorded in [`checkpoints/weights.json`](checkpoints/weights.json).
 
 | Checkpoint | Training dataset | Local checkpoint path | Download |
 | --- | --- | --- | --- |
-| STAR / University-1652 | University-1652 | `checkpoints/university1652/weights_e1_0.9535.pth` | Link to be added |
-| STAR / SUES-200 150 m | SUES-200, 150 m | `checkpoints/sues200_150m/weights_e1_0.9728.pth` | Link to be added |
+| STAR / University-1652 | University-1652 | `checkpoints/university1652/weights_e1_0.9535.pth` | [Google Drive](https://drive.google.com/file/d/1_DNSV1A3AkkqyTi9S1CDJMV8a_zT3toT/view?usp=drive_link) |
 
-The manifest records the exact file size and SHA-256 of each checkpoint. Model weights are hosted separately from the source code. You can inspect the entries now:
+The manifest records the exact file size and SHA-256 of each checkpoint. Model weights are hosted separately from the source code. Inspect the available checkpoints:
 
 ```bash
 python tools/download_weights.py --list
 ```
 
-After the links are available, download and verify the selected weights:
+Download and verify the selected weights:
 
 ```bash
 python tools/download_weights.py --model university1652
-python tools/download_weights.py --model sues200_150m
 ```
 
-Manual downloads can be placed at the same paths and checked with these commands. See [Checkpoint instructions](checkpoints/README.md). The released STAR weights are separate from the ImageNet weights selected by `--pretrained` during training. Evaluation loads the STAR checkpoint directly.
+The downloader handles Google Drive file links with `gdown` and checks each file against the recorded SHA-256. A manual download can be placed at the same path and checked with this command. This release distributes the University-1652 checkpoint; SUES-200 evaluation uses a checkpoint from your own SUES-200 training run. See [Checkpoint instructions](checkpoints/README.md). The released STAR weights are separate from the ImageNet weights selected by `--pretrained` during training. Evaluation loads the STAR checkpoint directly.
 
 ## Training and evaluation
 
@@ -120,12 +118,19 @@ For SUES-200, `--altitude` accepts 150, 200, 250, or 300. Training always pairs 
 | Drone sequence length | 5 | 5 |
 | Batch size | 16 | 16 |
 | Epochs | 1 | 1 |
-| Learning rate | 0.001 | 0.0006 |
-| Script default for `pretrained` | `False` | `True` |
+| Initial learning rate | 0.001 | 0.001 |
+| Optimizer | AdamW | AdamW |
+| LR schedule | Cosine decay | Cosine decay |
+| Warmup | First 10% of training steps | First 10% of training steps |
+| VSAM loss weight (lambda1) | 0.5 | 0.5 |
+| Classification loss weight (lambda2) | 0.03 | 0.03 |
+| ImageNet pretrained backbone | `True` | `True` |
 
-The commands above explicitly enable pretrained initialization for both experiments. The SUES-200 script defaults to 300 m; pass `--altitude 150` when training for the released 150 m setting.
+The defaults follow the paper's implementation details (Section IV-B). The backbone is initialized from ImageNet weights. The SUES-200 script defaults to 300 m; select the intended altitude explicitly. The paper reports 2,191 training iterations for its University-1652 setup; the code derives the step count from the selected data, batch size, and epoch count.
 
-Common overrides include `--data-folder`, `--device`, `--batch-size`, `--batch-size-eval`, `--epochs`, `--lr`, `--seed`, `--num-workers`, and `--output-dir`. `--checkpoint` / `--checkpoint-start` initializes model weights; it does not resume the optimizer, scheduler, or epoch counter.
+Common overrides include `--data-folder`, `--device`, `--batch-size`, `--batch-size-eval`, `--epochs`, `--lr`, `--warmup-ratio`, `--seed`, `--num-workers`, and `--output-dir`. `--checkpoint` / `--checkpoint-start` initializes model weights; it does not resume the optimizer, scheduler, or epoch counter.
+
+The objective is `InfoNCE + 0.5 * VSAM + 0.03 * classification`. Bidirectional InfoNCE sums the drone-to-satellite and satellite-to-drone terms as in Equation (5). `vsam_loss_weight`, `classification_loss_weight`, and `warmup_ratio` are explicit training configuration fields.
 
 Each run saves its resolved configuration, entry-script snapshot, log, and checkpoints under `outputs/<dataset>/<model>/<timestamp>/`. A limited pipeline check can be run with `--max-train-batches` and `--eval-max-images`; both default to 0, meaning the full dataset.
 
@@ -138,9 +143,9 @@ python eval_university.py \
   --direction D2S --batch-size 32 \
   --output outputs/evaluation/university_D2S.json
 
-# SUES-200, 150 m, drone-to-satellite
+# SUES-200, 150 m, using your own trained checkpoint
 python eval_sues200.py \
-  --checkpoint checkpoints/sues200_150m/weights_e1_0.9728.pth \
+  --checkpoint /path/to/your_sues200_checkpoint.pth \
   --altitude 150 --direction D2S --batch-size 32 \
   --output outputs/evaluation/sues200_150m_D2S.json
 ```
@@ -155,7 +160,7 @@ python eval_university_seq_D2S.py \
   --sequence-length 5
 
 python eval_sues200_seq_D2S.py \
-  --checkpoint checkpoints/sues200_150m/weights_e1_0.9728.pth \
+  --checkpoint /path/to/your_sues200_checkpoint.pth \
   --altitude 150 --sequence-length 5
 ```
 
@@ -169,7 +174,7 @@ Each entry script exposes a `Configuration` class and a `config` object. For exa
 
 ```python
 config.data_folder = "/path/to/SUES-200-512x512"
-config.checkpoint_start = "checkpoints/sues200_150m/weights_e1_0.9728.pth"
+config.checkpoint_start = "/path/to/your_sues200_checkpoint.pth"
 config.altitude = 150
 config.direction = "D2S"
 ```

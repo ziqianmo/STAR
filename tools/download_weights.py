@@ -3,9 +3,10 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import tempfile
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 PROJECT = Path(__file__).resolve().parents[1]
 MANIFEST = PROJECT / "checkpoints/weights.json"
@@ -39,6 +40,49 @@ def verify(filename, entry):
         raise ValueError("Checkpoint SHA-256 does not match the released file.")
 
 
+def google_drive_file_id(url):
+    """Recognize file-sharing and direct-download URLs from Google Drive."""
+    parsed = urlparse(url)
+    if parsed.hostname not in (
+        "drive.google.com",
+        "www.drive.google.com",
+        "drive.usercontent.google.com",
+    ):
+        return None
+    match = re.match(r"^/file/d/([A-Za-z0-9_-]+)(?:/|$)", parsed.path)
+    file_id = match.group(1) if match else parse_qs(parsed.query).get("id", [""])[0]
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", file_id):
+        raise ValueError("Use a Google Drive file link, not a folder link.")
+    return file_id
+
+
+def download_google_drive(file_id, temporary):
+    try:
+        import gdown
+    except ImportError as error:
+        raise RuntimeError(
+            "Google Drive downloads require gdown. Install requirements.txt first."
+        ) from error
+    try:
+        # gdown's legacy default browser agent can redirect public files to sign-in.
+        result = gdown.download(
+            id=file_id,
+            output=str(temporary),
+            quiet=False,
+            use_cookies=False,
+            user_agent="Mozilla/5.0",
+            timeout=(20, 120),
+            retries=2,
+        )
+    except Exception as error:
+        raise RuntimeError(
+            "Google Drive download failed. Check public link access, download quota, "
+            "and network connectivity. " + str(error)
+        ) from error
+    if result is None:
+        raise RuntimeError("Google Drive did not return a downloadable file.")
+
+
 def download(entry, root, url):
     destination = checkpoint_path(root, entry)
     if destination.exists():
@@ -46,8 +90,10 @@ def download(entry, root, url):
         print("Already verified:", destination)
         return destination
     if urlparse(url).scheme not in ("https", "http"):
-        raise ValueError("A direct HTTP(S) download URL is required.")
-    import requests
+        raise ValueError(
+            "An HTTP(S) download URL or Google Drive file link is required."
+        )
+    file_id = google_drive_file_id(url)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -59,17 +105,22 @@ def download(entry, root, url):
         temporary = Path(stream.name)
     try:
         print("Downloading:", destination, flush=True)
-        with requests.get(url, stream=True, timeout=(20, 120)) as response:
-            response.raise_for_status()
-            received = 0
-            with temporary.open("wb") as stream:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    received += len(chunk)
-                    if received > entry["size_bytes"]:
-                        raise ValueError(
-                            "Download exceeds the recorded checkpoint size."
-                        )
-                    stream.write(chunk)
+        if file_id:
+            download_google_drive(file_id, temporary)
+        else:
+            import requests
+
+            with requests.get(url, stream=True, timeout=(20, 120)) as response:
+                response.raise_for_status()
+                received = 0
+                with temporary.open("wb") as stream:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        received += len(chunk)
+                        if received > entry["size_bytes"]:
+                            raise ValueError(
+                                "Download exceeds the recorded checkpoint size."
+                            )
+                        stream.write(chunk)
         verify(temporary, entry)
         if destination.exists():
             raise FileExistsError(
@@ -90,7 +141,8 @@ def main(argv=None):
         "--list", action="store_true", help="Show checkpoints and link availability"
     )
     parser.add_argument(
-        "--url", help="Override one model's URL with a direct download link"
+        "--url",
+        help="Override one model's URL with a Google Drive file link or direct HTTP(S) link",
     )
     parser.add_argument("--output-dir", type=Path, default=PROJECT / "checkpoints")
     args = parser.parse_args(argv)
@@ -120,13 +172,18 @@ def main(argv=None):
                 f"The {name} download link has not been added yet. "
                 "Place the checkpoint at "
                 + str(destination)
-                + ", or supply --url with a direct HTTP(S) link."
+                + ", or supply --url with a Google Drive file link or direct HTTP(S) link."
             )
         if urlparse(url).scheme not in ("https", "http"):
-            parser.error("A direct HTTP(S) download URL is required.")
+            parser.error(
+                "An HTTP(S) download URL or Google Drive file link is required."
+            )
     for name in selected:
         entry = entries[name]
-        download(entry, args.output_dir, args.url or entry.get("url") or "")
+        try:
+            download(entry, args.output_dir, args.url or entry.get("url") or "")
+        except (OSError, RuntimeError, ValueError) as error:
+            parser.error(str(error))
 
 
 if __name__ == "__main__":

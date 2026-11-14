@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 
 class InfoNCE(nn.Module):
+    """Bidirectional InfoNCE summed as in the STAR paper, Equation (5)."""
 
     def __init__(
         self, loss_function, device="cuda" if torch.cuda.is_available() else "cpu"
@@ -25,9 +26,8 @@ class InfoNCE(nn.Module):
             len(logits_per_image1), dtype=torch.long, device=self.device
         )
 
-        loss = (
-            self.loss_function(logits_per_image1, labels)
-            + self.loss_function(logits_per_image2, labels)
-        ) / 2
+        loss = self.loss_function(logits_per_image1, labels) + self.loss_function(
+            logits_per_image2, labels
+        )
 
         return loss
