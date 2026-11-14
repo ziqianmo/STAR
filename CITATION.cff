@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use STAR in your research, please cite the paper below."
+title: "STAR: Spatio-Temporal Alignment and Refinement for Cross-View Geo-Localization"
+type: software
+authors: &authors
+  - family-names: Mo
+    given-names: Ziqian
+  - family-names: Sun
+    given-names: Yuxi
+  - family-names: Jia
+    given-names: Sen
+  - family-names: Xu
+    given-names: Meng
+preferred-citation:
+  type: article
+  title: "STAR: Spatio-Temporal Alignment and Refinement for Cross-View Geo-Localization"
+  authors: *authors
+  journal: "IEEE Transactions on Geoscience and Remote Sensing"
+  volume: "64"
+  year: 2026
+  doi: "10.1109/TGRS.2026.3723684"

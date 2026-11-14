@@ -1,0 +1,27 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Data and local runtime state
+/data/
+/.runtime/
+/outputs/
+/runs/
+.env
+.env.*
+
+# Keep the release manifest and instructions; distribute weights separately.
+/checkpoints/*
+!/checkpoints/README.md
+!/checkpoints/weights.json
+*.pth
+*.pt
+*.ckpt
+*.part
+*.log
+*.zip
